@@ -4,6 +4,7 @@ const SHELL = [
   './', './index.html', './manifest.webmanifest',
   './css/app.css',
   './js/app.js', './js/store.js', './js/schema.js', './js/ui.js', './js/audio.js', './js/ai.js',
+  './js/hwpx.js', './js/vendor/fflate.module.js', './assets/form.hwpx',
   './assets/logo.png', './assets/favicon.png', './assets/icon-192.png', './assets/icon-512.png',
 ];
 

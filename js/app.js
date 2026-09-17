@@ -7,6 +7,18 @@ import {
 } from './schema.js';
 import { Recorder, fmtTime, hasRecorder, hasLiveSTT, transcribeFile } from './audio.js';
 import { analyze, filledCount } from './ai.js';
+import * as SCHEMA from './schema.js';
+import { saveHwpx, siteBlocks, visitBlocks } from './hwpx.js';
+
+async function hwpxSave(filename, title, blocks) {
+  try {
+    toast('한글 파일을 만드는 중…');
+    await saveHwpx(filename, title, blocks);
+    toast('내려받았습니다');
+  } catch (e) {
+    toast('한글 파일 생성 실패 : ' + e.message);
+  }
+}
 
 const view = () => $('#view');
 const go = (hash) => { location.hash = hash; };
@@ -108,6 +120,11 @@ function viewSite(id) {
       h('button', { class: 'btn btn-g', onclick: () => copyText(siteText(s), '상담일지를 복사했습니다') }, '텍스트 복사'),
       h('button', { class: 'btn btn-g', onclick: () => download(`상담일지_${s.org}.txt`, siteText(s)) }, '파일 저장')),
     h('div', { class: 'row', style: 'margin-top:8px' },
+      h('button', {
+        class: 'btn btn-s btn-full',
+        onclick: () => hwpxSave(`상담일지_${s.org}.hwpx`, `${s.org} 상담일지`, siteBlocks(s, SCHEMA)),
+      }, '한글 파일(hwpx) 내려받기')),
+    h('div', { class: 'row', style: 'margin-top:8px' },
       h('button', { class: 'btn btn-s btn-full', onclick: () => go('#/rec?site=' + id) }, '🎙 녹음 · 분석으로 채우기')),
     h('div', { class: 'row', style: 'margin-top:8px' },
       h('button', {
@@ -151,6 +168,11 @@ function viewVisit(id) {
     h('div', { class: 'row' },
       h('button', { class: 'btn btn-g', onclick: () => copyText(visitText(v, s), '질문지를 복사했습니다') }, '텍스트 복사'),
       h('button', { class: 'btn btn-g', onclick: () => download(`방문질문지_${s?.org || ''}_${v.date}.txt`, visitText(v, s)) }, '파일 저장')),
+    h('div', { class: 'row', style: 'margin-top:8px' },
+      h('button', {
+        class: 'btn btn-s btn-full',
+        onclick: () => hwpxSave(`방문질문지_${s?.org || ''}_${v.date}.hwpx`, `${s?.org || ''} 고객 방문 질문지`, visitBlocks(v, s, SCHEMA)),
+      }, '한글 파일(hwpx) 내려받기')),
     h('div', { class: 'row', style: 'margin-top:8px' },
       h('button', { class: 'btn btn-s btn-full', onclick: () => go(`#/rec?site=${v.siteId}&visit=${id}`) }, '🎙 녹음 · 분석으로 채우기')),
     h('div', { class: 'row', style: 'margin-top:8px' },
