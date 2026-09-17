@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1">
+<meta name="theme-color" content="#104275">
+<meta name="description" content="마인드원 컨설턴트용 고객 방문 질문지 · 상담일지 기록 앱">
+<title>마인드원 컨설턴트</title>
+<link rel="icon" href="./assets/favicon.png">
+<link rel="apple-touch-icon" href="./assets/icon-192.png">
+<link rel="manifest" href="./manifest.webmanifest">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;500;700&family=Montserrat:wght@600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="./css/app.css">
+</head>
+<body>
+
+<header class="hd">
+  <button id="back" style="display:none" aria-label="뒤로">‹</button>
+  <img src="./assets/logo.png" alt="MIND ONE">
+  <span class="t" id="title">사이트</span>
+  <span class="sp">
+    <button onclick="location.hash='#/rec'" aria-label="녹음">🎙</button>
+  </span>
+</header>
+
+<main id="view"></main>
+
+<nav class="tabs">
+  <a href="#/" data-match="/,/site,/visit"><span class="i">🏢</span>사이트</a>
+  <a href="#/rec" data-match="/rec"><span class="i">🎙</span>녹음 · 분석</a>
+  <a href="#/settings" data-match="/settings"><span class="i">⚙️</span>설정</a>
+  <a href="http://mind-one.co.kr/" target="_blank" rel="noopener"><span class="i">🌐</span>홈페이지</a>
+</nav>
+
+<script type="module" src="./js/app.js"></script>
+</body>
+</html>
