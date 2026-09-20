@@ -39,30 +39,36 @@ ${transcript}
 answers 는 위 19개 항목 모두를 키로 포함하고, 녹취에 근거가 없으면 "" 로 둡니다.`;
 }
 
+/** 회사 공용 서버(프록시)가 설정돼 있으면 키 없이 그쪽으로 보낸다 */
+export const hasAi = (settings) => !!(settings.proxyUrl || settings.anthropicKey);
+
 export async function analyze(transcript, ctx, settings, onStatus) {
-  if (!settings.anthropicKey) throw new Error('설정에서 Claude API 키를 먼저 입력해 주세요.');
+  if (!hasAi(settings)) throw new Error('AI 분석을 쓰려면 설정에서 회사 서버 주소나 Claude API 키를 넣어 주세요.');
   if (!transcript || transcript.trim().length < 20) throw new Error('전사 텍스트가 너무 짧습니다.');
   onStatus?.('분석 중… 녹취 길이에 따라 20초~1분 걸립니다');
 
-  const r = await fetch(API, {
-    method: 'POST',
-    headers: {
+  const body = JSON.stringify({
+    model: settings.model || 'claude-sonnet-5',
+    max_tokens: 4000,
+    system: SYSTEM,
+    messages: [{ role: 'user', content: userPrompt(transcript, ctx) }],
+  });
+
+  const useProxy = !!settings.proxyUrl;
+  const headers = useProxy
+    ? { 'content-type': 'application/json', ...(settings.teamCode ? { 'x-team-code': settings.teamCode } : {}) }
+    : {
       'content-type': 'application/json',
       'x-api-key': settings.anthropicKey,
       'anthropic-version': '2023-06-01',
       'anthropic-dangerous-direct-browser-access': 'true',
-    },
-    body: JSON.stringify({
-      model: settings.model || 'claude-sonnet-5',
-      max_tokens: 4000,
-      system: SYSTEM,
-      messages: [{ role: 'user', content: userPrompt(transcript, ctx) }],
-    }),
-  });
+    };
+
+  const r = await fetch(useProxy ? settings.proxyUrl : API, { method: 'POST', headers, body });
 
   if (!r.ok) {
     const t = await r.text();
-    if (r.status === 401) throw new Error('API 키가 올바르지 않습니다. 설정에서 확인해 주세요.');
+    if (r.status === 401 || r.status === 403) throw new Error('인증에 실패했습니다. 설정의 키 또는 팀 코드를 확인해 주세요.');
     throw new Error(`분석 실패 (${r.status}) ${t.slice(0, 200)}`);
   }
   const j = await r.json();

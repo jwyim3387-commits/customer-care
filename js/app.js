@@ -6,7 +6,9 @@ import {
   SITE_HEAD, MANAGER_FIELDS, LOG_FIELDS, SITE_MEMO, TIPS_VISIT, TIPS_SITE,
 } from './schema.js';
 import { Recorder, fmtTime, hasRecorder, hasLiveSTT, transcribeFile } from './audio.js';
-import { analyze, filledCount } from './ai.js';
+import { analyze, filledCount, hasAi } from './ai.js';
+import { analyzeLocal } from './localai.js';
+import { putAudio, getAudio, delAudio, listAudio, usage, fmtSize } from './db.js';
 import * as SCHEMA from './schema.js';
 import { saveHwpx, siteBlocks, visitBlocks } from './hwpx.js';
 
@@ -231,15 +233,64 @@ function viewRec(params) {
     if (text) { ta.value = text; state.text = text; }
     state.file = new File([blob], `상담녹음_${new Date().toISOString().slice(0, 16).replace(/[:T]/g, '')}.webm`, { type: blob.type || 'audio/webm' });
     audioInfo.textContent = `녹음 ${fmtTime(sec)} · ${(blob.size / 1024 / 1024).toFixed(1)}MB`;
-    saveAudioBtn.disabled = false;
+    saveAudioBtn.disabled = false; dlAudioBtn.disabled = false;
     toast('녹음을 마쳤습니다');
   };
 
   const audioInfo = h('div', { class: 'sub', style: 'margin:6px 0 0' }, '');
   const saveAudioBtn = h('button', {
     class: 'btn btn-g btn-sm', disabled: true,
+    onclick: async () => {
+      if (!state.file) return;
+      try {
+        await putAudio({
+          id: S.uid(), siteId, visitId, name: state.file.name, type: state.file.type,
+          size: state.file.size, blob: state.file, sec: state.sec, createdAt: new Date().toISOString(),
+        });
+        toast('앱에 보관했습니다');
+        refreshAudioList();
+      } catch (e) {
+        toast('보관 실패 : 저장 공간을 확인해 주세요');
+      }
+    }
+  }, '앱에 보관');
+
+  const dlAudioBtn = h('button', {
+    class: 'btn btn-g btn-sm', disabled: true,
     onclick: () => { if (state.file) download(state.file.name, state.file, state.file.type); }
-  }, '녹음 파일 저장');
+  }, '기기에 저장');
+
+  const audioList = h('div', {});
+  async function refreshAudioList() {
+    const rows = await listAudio(siteId);
+    audioList.replaceChildren(...(rows.length
+      ? rows.map(r => h('div', { class: 'log' },
+        h('div', { class: 'h' }, h('b', {}, (r.createdAt || '').slice(0, 16).replace('T', ' ')),
+          `${fmtSize(r.size)}${r.sec ? ' · ' + fmtTime(r.sec) : ''}`),
+        h('div', { class: 'row' },
+          h('button', {
+            class: 'btn btn-g btn-sm', onclick: async () => {
+              const full = await getAudio(r.id);
+              const url = URL.createObjectURL(full.blob);
+              const au = h('audio', { src: url, controls: true, style: 'width:100%;margin-top:6px' });
+              audioList.prepend(au); au.play?.();
+            }
+          }, '재생'),
+          h('button', {
+            class: 'btn btn-g btn-sm', onclick: async () => {
+              const full = await getAudio(r.id);
+              download(full.name || 'recording.webm', full.blob, full.type);
+            }
+          }, '내려받기'),
+          h('button', {
+            class: 'btn btn-d btn-sm', onclick: async () => {
+              if (!confirmDel('이 녹음을 지울까요?')) return;
+              await delAudio(r.id); refreshAudioList(); toast('지웠습니다');
+            }
+          }, '삭제'))))
+      : [h('div', { class: 'sub', style: 'margin:0' }, '보관한 녹음이 없습니다')]));
+  }
+  refreshAudioList();
 
   const fileIn = h('input', {
     type: 'file', accept: 'audio/*,video/mp4,.m4a,.mp3,.wav', style: 'display:none',
@@ -247,10 +298,10 @@ function viewRec(params) {
       const f = e.target.files[0]; if (!f) return;
       state.file = f;
       audioInfo.textContent = `${f.name} · ${(f.size / 1024 / 1024).toFixed(1)}MB`;
-      saveAudioBtn.disabled = false;
+      saveAudioBtn.disabled = false; dlAudioBtn.disabled = false;
       if (!st.openaiKey) {
         status.className = 'note';
-        status.textContent = '업로드한 음성을 자동 전사하려면 설정에서 Whisper(OpenAI) API 키를 입력해 주세요. 지금은 전사 텍스트를 직접 붙여넣어도 됩니다.';
+        status.textContent = '이 파일은 앱에 보관됩니다. 글로 바꾸려면 아래 방법 중 하나를 쓰세요 : ① 휴대폰 키보드의 마이크 버튼으로 전사 칸에 받아쓰기 ② 클로바노트 결과 붙여넣기 ③ 설정에 Whisper 키 입력';
         return;
       }
       try {
@@ -267,24 +318,41 @@ function viewRec(params) {
   const status = h('div', { class: 'sub' }, '');
   const result = h('div', {});
 
+  const ctx = () => {
+    const v = visitId ? S.visit(visitId) : null;
+    const s2 = S.site(siteId);
+    return {
+      dept: v?.dept || s2?.org || '', counterpart: v?.counterpart || '',
+      visitor: v?.visitor || '', date: v?.date || S.today(),
+    };
+  };
+
+  const runLocal = () => {
+    try {
+      status.className = 'note';
+      const res = analyzeLocal(state.text, ctx());
+      status.textContent = `정리 완료 : ${filledCount(res)}개 항목을 찾았습니다. 키 없이 규칙으로 나눈 결과이니 내용을 꼭 확인하세요.`;
+      result.replaceChildren(preview(res, siteId, visitId, state));
+    } catch (e) {
+      status.className = 'note err'; status.textContent = e.message;
+    }
+  };
+
+  const localBtn = h('button', { class: 'btn btn-s btn-full', onclick: runLocal }, '키 없이 정리 (무료)');
+
   const analyzeBtn = h('button', {
     class: 'btn btn-p btn-full', onclick: async () => {
-      const v = visitId ? S.visit(visitId) : null;
-      const s = S.site(siteId);
       try {
         analyzeBtn.disabled = true;
         status.className = 'note'; status.textContent = '분석 중…';
-        const res = await analyze(state.text, {
-          dept: v?.dept || s?.org || '', counterpart: v?.counterpart || '',
-          visitor: v?.visitor || '', date: v?.date || S.today(),
-        }, S.settings(), (m) => { status.textContent = m; });
-        status.textContent = `분석 완료 : ${filledCount(res)}개 항목을 찾았습니다. 내용을 확인하고 반영하세요.`;
+        const res = await analyze(state.text, ctx(), S.settings(), (m) => { status.textContent = m; });
+        status.textContent = `AI 분석 완료 : ${filledCount(res)}개 항목을 찾았습니다. 내용을 확인하고 반영하세요.`;
         result.replaceChildren(preview(res, siteId, visitId, state));
       } catch (e) {
         status.className = 'note err'; status.textContent = e.message;
       } finally { analyzeBtn.disabled = false; }
     }
-  }, '✨ AI 분석 → 양식 채우기');
+  }, '✨ AI 분석 (정확도 높음)');
 
   const siteSel = h('select', { onchange: (e) => go(`#/rec?site=${e.target.value}${visitId ? '&visit=' + visitId : ''}`) },
     ...S.sites().map(s => h('option', { value: s.id, selected: s.id === siteId }, s.org)));
@@ -296,10 +364,21 @@ function viewRec(params) {
       visitId ? h('div', { class: 'sub', style: 'margin:0' }, '이 방문 질문지에 함께 반영됩니다') : null),
     card('현장 녹음', box, h('div', { class: 'row' }, startBtn, stopBtn),
       h('div', { class: 'row', style: 'margin-top:8px' },
-        h('button', { class: 'btn btn-s btn-full', onclick: () => fileIn.click() }, '음성 파일 올리기'), saveAudioBtn),
+        h('button', { class: 'btn btn-s btn-full', onclick: () => fileIn.click() }, '음성 파일 올리기')),
+      h('div', { class: 'row', style: 'margin-top:8px' }, saveAudioBtn, dlAudioBtn),
       fileIn, audioInfo,
       h('div', { class: 'note', style: 'margin-top:10px' }, '녹음은 상대에게 부담이 됩니다. 반드시 동의를 얻고 녹음하세요.')),
-    card('전사 내용', ta, status, h('div', { style: 'height:8px' }), analyzeBtn, result),
+    card('보관한 녹음', h('div', { class: 'sub' }, '이 기기에만 저장됩니다. 용량이 차면 오래된 것부터 지우세요'), audioList),
+    card('전사 내용', ta,
+      h('div', { class: 'sub' }, hasLiveSTT()
+        ? '녹음 중 자동으로 받아써집니다. 아이폰은 키보드의 마이크 버튼을 눌러 이 칸에 받아쓰기 하세요'
+        : '이 칸을 누르고 키보드의 마이크 버튼으로 받아쓰거나, 클로바노트 결과를 붙여넣으세요'),
+      status, h('div', { style: 'height:8px' }),
+      localBtn,
+      h('div', { style: 'height:8px' }),
+      hasAi(S.settings()) ? analyzeBtn
+        : h('div', { class: 'sub', style: 'margin:0' }, 'AI 분석은 설정에 회사 서버 주소나 키를 넣으면 쓸 수 있습니다'),
+      result),
   ), true, siteId ? '#/site/' + siteId : '#/');
 }
 
@@ -364,9 +443,22 @@ function viewSettings() {
     },
   });
 
+  usage().then(u => {
+    const el = $('#usage');
+    if (el) el.textContent += ` · 보관 녹음 ${u.count}건 (${fmtSize(u.bytes)})`;
+  }).catch(() => {});
+
   render('설정', h('div', {},
-    card('AI 분석 키',
-      k('anthropicKey', 'Claude API 키 (분석)', 'sk-ant-...', 'console.anthropic.com 에서 발급. 녹취를 양식 항목으로 정리할 때 사용합니다'),
+    card('AI 분석 (선택)',
+      h('div', { class: 'note' }, '키를 넣지 않아도 「키 없이 정리」로 녹취를 양식에 나눠 담을 수 있습니다. AI 분석은 더 정확하게 정리할 때만 씁니다.'),
+      h('label', { class: 'f' }, h('span', {}, '회사 서버 주소 (팀 공용, 키 불필요)'),
+        h('input', {
+          type: 'text', value: st.proxyUrl || '', placeholder: 'https://....workers.dev/analyze',
+          oninput: (e) => S.setSetting('proxyUrl', e.target.value.trim()),
+        }),
+        h('div', { class: 'sub', style: 'margin:4px 0 0' }, '회사가 서버를 한 번 만들어 두면 이 주소만 넣으면 됩니다. 휴대폰마다 키를 넣을 필요가 없습니다')),
+      k('teamCode', '팀 코드 (회사 서버용)', '사내에서 정한 값', '서버가 요구할 때만 입력합니다'),
+      k('anthropicKey', 'Claude API 키 (개인용, 서버가 없을 때)', 'sk-ant-...', 'console.anthropic.com 에서 발급'),
       h('label', { class: 'f' }, h('span', {}, '분석 모델'),
         h('select', { onchange: (e) => S.setSetting('model', e.target.value) },
           ...['claude-sonnet-5', 'claude-opus-5', 'claude-haiku-4-5-20251001'].map(m =>
@@ -374,7 +466,7 @@ function viewSettings() {
       k('openaiKey', 'Whisper API 키 (음성 파일 전사)', 'sk-...', '업로드한 녹음 파일을 글로 바꿀 때만 사용합니다. 현장 녹음은 키 없이도 받아쓰기가 됩니다'),
       h('div', { class: 'note' }, '키는 이 휴대폰 브라우저에만 저장되며 마인드원 서버로 전송되지 않습니다. 공용 기기에서는 사용 후 지워 주세요.')),
     card('데이터',
-      h('div', { class: 'sub' }, `사이트 ${S.all().sites.length}곳 · 질문지 ${S.all().visits.length}건`),
+      h('div', { class: 'sub', id: 'usage' }, `사이트 ${S.all().sites.length}곳 · 질문지 ${S.all().visits.length}건`),
       h('div', { class: 'row' },
         h('button', { class: 'btn btn-g', onclick: () => download(`상담데이터_${S.today()}.json`, S.exportJson(), 'application/json') }, '백업 내보내기'),
         h('button', { class: 'btn btn-g', onclick: () => fileIn.click() }, '백업 복원')),
