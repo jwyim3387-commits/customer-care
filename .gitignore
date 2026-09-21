@@ -3,3 +3,7 @@ Thumbs.db
 *.log
 node_modules/
 .vscode/
+.wrangler/
+server/.wrangler/
+.dev.vars
+*.dev.toml
