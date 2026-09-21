@@ -8,7 +8,9 @@ CREATE TABLE IF NOT EXISTS docs (
   updated_at TEXT NOT NULL,            -- ISO 시각
   deleted    INTEGER NOT NULL DEFAULT 0,
   updated_by TEXT,                     -- 누가 마지막으로 고쳤는지
+  server_at  TEXT,                     -- 서버가 받은 시각 (내려받기 기준. 기기 시계 차이를 막는다)
   PRIMARY KEY (kind, id)
 );
 
 CREATE INDEX IF NOT EXISTS idx_docs_updated ON docs (updated_at);
+CREATE INDEX IF NOT EXISTS idx_docs_server ON docs (server_at);

@@ -128,8 +128,10 @@ async function analyze(request, env, cors) {
 async function pull(request, env, cors) {
   if (!env.DB) return json({ error: '서버에 저장소(D1)가 연결되지 않았습니다' }, 500, cors);
   const since = new URL(request.url).searchParams.get('since') || '';
+  // 기기 시계가 서로 달라도 놓치지 않도록, 서버가 받은 시각(server_at)을 기준으로 고른다
   const rows = await env.DB.prepare(
-    'SELECT kind, id, data, updated_at, deleted FROM docs WHERE updated_at > ?1 ORDER BY updated_at LIMIT 2000'
+    `SELECT kind, id, data, updated_at, deleted FROM docs
+     WHERE COALESCE(server_at, updated_at) > ?1 ORDER BY COALESCE(server_at, updated_at) LIMIT 2000`
   ).bind(since).all();
 
   const items = (rows.results || []).map(r => ({
@@ -151,11 +153,12 @@ async function push(request, env, cors) {
 
   let saved = 0, skipped = 0;
   const stmt = env.DB.prepare(
-    `INSERT INTO docs (kind, id, data, updated_at, deleted, updated_by)
-     VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+    `INSERT INTO docs (kind, id, data, updated_at, deleted, updated_by, server_at)
+     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
      ON CONFLICT(kind, id) DO UPDATE SET
        data = excluded.data, updated_at = excluded.updated_at,
-       deleted = excluded.deleted, updated_by = excluded.updated_by
+       deleted = excluded.deleted, updated_by = excluded.updated_by,
+       server_at = excluded.server_at
      WHERE excluded.updated_at > docs.updated_at`
   );
 
@@ -163,7 +166,7 @@ async function push(request, env, cors) {
   for (const it of items.slice(0, 1000)) {
     if (!it || !it.kind || !it.id) { skipped++; continue; }
     const at = it.updatedAt || now;
-    batch.push(stmt.bind(it.kind, it.id, it.deleted ? '{}' : JSON.stringify(it.data || {}), at, it.deleted ? 1 : 0, user));
+    batch.push(stmt.bind(it.kind, it.id, it.deleted ? '{}' : JSON.stringify(it.data || {}), at, it.deleted ? 1 : 0, user, now));
     saved++;
   }
   if (batch.length) await env.DB.batch(batch);

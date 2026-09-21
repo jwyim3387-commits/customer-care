@@ -456,13 +456,14 @@ function viewSettings() {
   const syncMsg = h('div', { class: 'sub', style: 'margin:6px 0 0' },
     canSync(st) ? `마지막 동기화 : ${fmtWhen(st.lastSync)}` : '서버 주소를 넣으면 팀원과 기록을 함께 쓸 수 있습니다');
 
-  async function doSync() {
+  async function doSync(full) {
     try {
       syncMsg.className = 'sub';
-      const r = await syncNow(S.settings(), (m) => { syncMsg.textContent = m; });
+      const r = await syncNow(S.settings(), (m) => { syncMsg.textContent = m; }, { full });
       const ap = r.applied;
-      syncMsg.textContent = `동기화 완료 : 받은 ${r.pulled}건 (새 사이트 ${ap.sitesNew} · 새 질문지 ${ap.visitsNew}), 올린 ${r.pushed}건`;
-      toast('동기화했습니다');
+      const merged = ap.duplicatesMerged ? ` · 중복 정리 ${ap.duplicatesMerged}곳` : '';
+      syncMsg.textContent = `${full ? '전체 다시 받기' : '동기화'} 완료 : 받은 ${r.pulled}건 (새 사이트 ${ap.sitesNew} · 새 질문지 ${ap.visitsNew}${merged}), 올린 ${r.pushed}건`;
+      toast(full ? '전체를 다시 받았습니다' : '동기화했습니다');
     } catch (e) {
       syncMsg.className = 'note err'; syncMsg.textContent = e.message;
     }
@@ -521,8 +522,16 @@ function viewSettings() {
             try { const r = await health(S.settings()); syncMsg.textContent = `서버 정상 (저장소 ${r.db ? '연결' : '없음'} · 분석 ${r.ai ? '가능' : '불가'})`; syncMsg.className = 'sub'; }
             catch (e) { syncMsg.textContent = '연결 실패 : ' + e.message; syncMsg.className = 'note err'; }
           }
-        }, '연결 확인')),
+        }, '연결 확인'),
+        h('button', {
+          class: 'btn btn-g',
+          onclick: () => { if (confirm('서버의 모든 기록을 처음부터 다시 받습니다.
+
+빠진 사이트나 상담 기록이 있을 때 씁니다. 내 기록은 지워지지 않습니다.')) doSync(true); },
+        }, '전체 다시 받기')),
       syncMsg,
+      h('div', { class: 'sub', style: 'margin:2px 0 0' },
+        '기기끼리 내용이 다르면 「전체 다시 받기」를 양쪽에서 한 번씩 누르세요'),
       k('anthropicKey', 'Claude API 키 (서버가 없을 때만)', 'sk-ant-...', '개인 키로 분석하려면 입력합니다'),
       h('label', { class: 'f' }, h('span', {}, '분석 모델'),
         h('select', { onchange: (e) => S.setSetting('model', e.target.value) },

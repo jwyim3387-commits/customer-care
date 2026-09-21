@@ -34,12 +34,14 @@ export async function health(st) {
 
 /**
  * 한 번 동기화한다.
+ * @param {object} [opt] full 을 켜면 마지막 시각을 무시하고 처음부터 모두 주고받는다
  * @returns {{pulled:number, pushed:number, applied:object, at:string}}
  */
-export async function syncNow(st, onStatus) {
+export async function syncNow(st, onStatus, { full = false } = {}) {
   if (!canSync(st)) throw new Error('설정에서 회사 서버 주소를 먼저 넣어 주세요');
   const base = serverBase(st);
-  const since = st.lastSync || '';
+  // 전체 다시 받기 : 처음부터 모두 주고받아, 그동안 놓친 기록을 되살린다
+  const since = full ? '' : (st.lastSync || '');
 
   onStatus?.('서버에서 받는 중…');
   const down = await call(`${base}/sync?since=${encodeURIComponent(since)}`, { headers: headers(st) });
