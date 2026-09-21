@@ -9,10 +9,13 @@ name = "mindone-cc"
 main = "worker.js"
 compatibility_date = "2026-01-01"
 
+[ai]
+binding = "AI"
+
 [[d1_databases]]
 binding = "DB"
 database_name = "mindone-cc"
-database_id = "여기에-d1-create-결과-id-를-넣으세요"
+database_id = "bcae275e-8b20-4b73-8a00-db8328ca53bf"
 
 [vars]
 # 앱 주소만 허용하려면 아래를 켠다(보안 강화). 비워 두면 모든 곳에서 호출 가능

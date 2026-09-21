@@ -2,6 +2,7 @@
  * 마인드원 컨설턴트 공용 서버 (Cloudflare Workers + D1)
  *
  * 두 가지 일을 한다.
+ *   POST /transcribe : 음성 파일을 글로 바꿔 준다 (Cloudflare Workers AI, 별도 키 불필요)
  *   POST /analyze  : 회사 Claude 키로 녹취를 분석해 돌려준다 (휴대폰에 키를 넣지 않아도 된다)
  *   GET  /sync     : 마지막 동기화 이후 바뀐 자료를 내려준다
  *   POST /sync     : 내 자료를 올린다 (같은 항목은 나중에 고친 쪽이 이긴다)
@@ -37,16 +38,51 @@ export default {
     }
 
     try {
+      if (url.pathname === '/transcribe' && request.method === 'POST') return transcribe(request, env, cors);
       if (url.pathname === '/analyze' && request.method === 'POST') return analyze(request, env, cors);
       if (url.pathname === '/sync' && request.method === 'GET') return pull(request, env, cors);
       if (url.pathname === '/sync' && request.method === 'POST') return push(request, env, cors);
-      if (url.pathname === '/health') return json({ ok: true, db: !!env.DB, ai: !!env.ANTHROPIC_API_KEY }, 200, cors);
+      if (url.pathname === '/health') return json({ ok: true, db: !!env.DB, ai: !!env.ANTHROPIC_API_KEY, stt: !!env.AI }, 200, cors);
       return json({ error: '없는 주소입니다' }, 404, cors);
     } catch (e) {
       return json({ error: String(e && e.message || e) }, 500, cors);
     }
   },
 };
+
+/* ───────── 음성 → 글 (Cloudflare Workers AI, 추가 키·비용 없음)
+   요청 본문에 음성 파일 바이트를 그대로 담아 보낸다. */
+const STT_LIMIT = 24 * 1024 * 1024;
+
+async function transcribe(request, env, cors) {
+  if (!env.AI) return json({ error: '서버에 음성 인식(AI)이 연결되지 않았습니다' }, 500, cors);
+  const buf = new Uint8Array(await request.arrayBuffer());
+  if (!buf.length) return json({ error: '음성 파일이 비어 있습니다' }, 400, cors);
+  if (buf.length > STT_LIMIT) {
+    return json({ error: `파일이 ${(buf.length / 1048576).toFixed(0)}MB 입니다. 24MB 이하로 나눠 올리거나 클로바노트를 쓰세요` }, 413, cors);
+  }
+
+  // base64 로 바꿔 whisper 에 넘긴다
+  let bin = '';
+  for (let i = 0; i < buf.length; i += 0x8000) bin += String.fromCharCode(...buf.subarray(i, i + 0x8000));
+  const b64 = btoa(bin);
+
+  try {
+    const r = await env.AI.run('@cf/openai/whisper-large-v3-turbo', {
+      audio: b64, task: 'transcribe', language: 'ko',
+    });
+    const text = (r && (r.text || r.transcription_info && r.transcript)) || '';
+    return json({ text, words: r && r.word_count, model: 'whisper-large-v3-turbo' }, 200, cors);
+  } catch (e) {
+    // 구형 모델로 한 번 더 시도
+    try {
+      const r2 = await env.AI.run('@cf/openai/whisper', { audio: [...buf] });
+      return json({ text: (r2 && r2.text) || '', model: 'whisper', turboError: String(e && e.message || e).slice(0, 300) }, 200, cors);
+    } catch (e2) {
+      return json({ error: '전사 실패 : ' + String(e && e.message || e).slice(0, 200) }, 502, cors);
+    }
+  }
+}
 
 /* ───────── 녹취 분석 (회사 키 사용) */
 async function analyze(request, env, cors) {

@@ -1,5 +1,5 @@
 // 오프라인 사용을 위한 앱 셸 캐시 (현장에서 통신이 약해도 입력은 가능하게)
-const CACHE = 'mindone-cc-v3';
+const CACHE = 'mindone-cc-v4';
 const SHELL = [
   './', './index.html', './manifest.webmanifest',
   './css/app.css',

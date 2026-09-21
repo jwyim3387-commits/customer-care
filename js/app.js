@@ -5,7 +5,7 @@ import {
   QUESTIONS, QUESTION_GROUPS, VISIT_HEAD, VISIT_PRE, VISIT_CLOSE,
   SITE_HEAD, MANAGER_FIELDS, LOG_FIELDS, SITE_MEMO, TIPS_VISIT, TIPS_SITE,
 } from './schema.js';
-import { Recorder, fmtTime, hasRecorder, hasLiveSTT, transcribeFile } from './audio.js';
+import { Recorder, fmtTime, hasRecorder, hasLiveSTT, transcribeFile, transcribeServer } from './audio.js';
 import { analyze, filledCount, hasAi } from './ai.js';
 import { analyzeLocal } from './localai.js';
 import { putAudio, getAudio, delAudio, listAudio, usage, fmtSize } from './db.js';
@@ -269,6 +269,26 @@ function viewRec(params) {
     onclick: () => { if (state.file) download(state.file.name, state.file, state.file.type); }
   }, '기기에 저장');
 
+  async function runTranscribe(file) {
+    const s2 = S.settings();
+    try {
+      status.className = 'note';
+      if (s2.serverUrl) {
+        const t = await transcribeServer(file, s2, (m) => { status.textContent = m; });
+        ta.value = t; state.text = t;
+        status.textContent = `전사 완료 (${t.length}자). 내용을 확인한 뒤 정리·분석을 눌러 주세요.`;
+      } else if (s2.openaiKey) {
+        const t = await transcribeFile(file, s2.openaiKey, (m) => { status.textContent = m; });
+        ta.value = t; state.text = t;
+        status.textContent = `전사 완료 (${t.length}자).`;
+      } else {
+        status.textContent = '이 파일은 앱에 보관됩니다. 글로 바꾸려면 설정에 회사 서버 주소를 넣거나, 키보드 마이크로 받아쓰거나, 클로바노트 결과를 붙여넣으세요.';
+      }
+    } catch (err) {
+      status.className = 'note err'; status.textContent = err.message;
+    }
+  }
+
   const audioList = h('div', {});
   async function refreshAudioList() {
     const rows = await listAudio(siteId);
@@ -285,6 +305,14 @@ function viewRec(params) {
               audioList.prepend(au); au.play?.();
             }
           }, '재생'),
+          h('button', {
+            class: 'btn btn-s btn-sm', onclick: async () => {
+              const full = await getAudio(r.id);
+              state.file = full.blob;
+              await runTranscribe(full.blob);
+              window.scrollTo(0, document.body.scrollHeight);
+            }
+          }, '전사'),
           h('button', {
             class: 'btn btn-g btn-sm', onclick: async () => {
               const full = await getAudio(r.id);
@@ -308,19 +336,7 @@ function viewRec(params) {
       state.file = f;
       audioInfo.textContent = `${f.name} · ${(f.size / 1024 / 1024).toFixed(1)}MB`;
       saveAudioBtn.disabled = false; dlAudioBtn.disabled = false;
-      if (!st.openaiKey) {
-        status.className = 'note';
-        status.textContent = '이 파일은 앱에 보관됩니다. 글로 바꾸려면 아래 방법 중 하나를 쓰세요 : ① 휴대폰 키보드의 마이크 버튼으로 전사 칸에 받아쓰기 ② 클로바노트 결과 붙여넣기 ③ 설정에 Whisper 키 입력';
-        return;
-      }
-      try {
-        status.className = 'note'; status.textContent = '전사 중…';
-        const t = await transcribeFile(f, st.openaiKey, (m) => { status.textContent = m; });
-        ta.value = t; state.text = t;
-        status.textContent = `전사 완료 (${t.length}자). 내용을 확인한 뒤 분석을 눌러 주세요.`;
-      } catch (err) {
-        status.className = 'note err'; status.textContent = err.message;
-      }
+      await runTranscribe(f);
     },
   });
 
