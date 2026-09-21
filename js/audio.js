@@ -100,19 +100,28 @@ export async function transcribeServer(file, st, onProgress) {
   if (file.size > 24 * 1024 * 1024) {
     throw new Error(`파일이 ${(file.size / 1048576).toFixed(0)}MB 입니다. 24MB 이하로 나눠 올리거나 클로바노트를 쓰세요.`);
   }
-  const mins = Math.max(1, Math.round(file.size / 1048576 * 5));
-  onProgress?.(`회사 서버에서 전사 중… 길이에 따라 ${mins}분 안팎 걸립니다`);
+  onProgress?.('회사 서버에서 전사 중… 보통 1~3분, 긴 녹음은 더 걸립니다');
+  const b64 = await toBase64(file);          // 휴대폰에서 변환해 서버 부담을 줄인다
   const r = await fetch(`${base}/transcribe`, {
     method: 'POST',
     headers: {
-      'content-type': 'application/octet-stream',
+      'content-type': 'text/plain',
       ...(st.teamCode ? { 'x-team-code': st.teamCode } : {}),
     },
-    body: file,
+    body: b64,
   });
   const j = await r.json().catch(() => ({}));
   if (!r.ok) throw new Error(j.error || `전사 실패 (${r.status})`);
   return j.text || '';
+}
+
+function toBase64(file) {
+  return new Promise((res, rej) => {
+    const fr = new FileReader();
+    fr.onload = () => res(String(fr.result).split(',')[1] || '');
+    fr.onerror = () => rej(new Error('파일을 읽지 못했습니다'));
+    fr.readAsDataURL(file);
+  });
 }
 
 /** 음성 파일 → 텍스트 (OpenAI Whisper API, 설정에서 키를 넣은 경우에만 동작) */

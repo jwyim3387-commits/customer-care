@@ -56,16 +56,26 @@ const STT_LIMIT = 24 * 1024 * 1024;
 
 async function transcribe(request, env, cors) {
   if (!env.AI) return json({ error: '서버에 음성 인식(AI)이 연결되지 않았습니다' }, 500, cors);
-  const buf = new Uint8Array(await request.arrayBuffer());
-  if (!buf.length) return json({ error: '음성 파일이 비어 있습니다' }, 400, cors);
-  if (buf.length > STT_LIMIT) {
-    return json({ error: `파일이 ${(buf.length / 1048576).toFixed(0)}MB 입니다. 24MB 이하로 나눠 올리거나 클로바노트를 쓰세요` }, 413, cors);
-  }
+  const ct = request.headers.get('content-type') || '';
+  let b64;
 
-  // base64 로 바꿔 whisper 에 넘긴다
-  let bin = '';
-  for (let i = 0; i < buf.length; i += 0x8000) bin += String.fromCharCode(...buf.subarray(i, i + 0x8000));
-  const b64 = btoa(bin);
+  if (ct.includes('text/plain')) {
+    // 휴대폰에서 이미 base64 로 바꿔 보낸 경우 (메모리 절약)
+    b64 = (await request.text()).trim();
+    if (!b64) return json({ error: '음성 파일이 비어 있습니다' }, 400, cors);
+    if (b64.length > STT_LIMIT * 1.4) {
+      return json({ error: '파일이 너무 큽니다. 24MB 이하로 나눠 올리거나 클로바노트를 쓰세요' }, 413, cors);
+    }
+  } else {
+    const buf = new Uint8Array(await request.arrayBuffer());
+    if (!buf.length) return json({ error: '음성 파일이 비어 있습니다' }, 400, cors);
+    if (buf.length > STT_LIMIT) {
+      return json({ error: `파일이 ${(buf.length / 1048576).toFixed(0)}MB 입니다. 24MB 이하로 나눠 올리거나 클로바노트를 쓰세요` }, 413, cors);
+    }
+    let bin = '';
+    for (let i = 0; i < buf.length; i += 0x8000) bin += String.fromCharCode(...buf.subarray(i, i + 0x8000));
+    b64 = btoa(bin);
+  }
 
   try {
     const r = await env.AI.run('@cf/openai/whisper-large-v3-turbo', {
@@ -76,7 +86,10 @@ async function transcribe(request, env, cors) {
   } catch (e) {
     // 구형 모델로 한 번 더 시도
     try {
-      const r2 = await env.AI.run('@cf/openai/whisper', { audio: [...buf] });
+      const bin2 = atob(b64);
+      const bytes = new Uint8Array(bin2.length);
+      for (let i = 0; i < bin2.length; i++) bytes[i] = bin2.charCodeAt(i);
+      const r2 = await env.AI.run('@cf/openai/whisper', { audio: [...bytes] });
       return json({ text: (r2 && r2.text) || '', model: 'whisper', turboError: String(e && e.message || e).slice(0, 300) }, 200, cors);
     } catch (e2) {
       return json({ error: '전사 실패 : ' + String(e && e.message || e).slice(0, 200) }, 502, cors);
