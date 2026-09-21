@@ -1,4 +1,6 @@
 // 녹음 · 전사 : ① 현장 녹음 + 브라우저 실시간 전사 ② 음성 파일 업로드 → Whisper 전사 ③ 텍스트 붙여넣기
+import { authHeaders } from './auth.js';
+
 export const hasRecorder = () => !!(navigator.mediaDevices && window.MediaRecorder);
 const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
 export const hasLiveSTT = () => !!SR;
@@ -106,6 +108,7 @@ export async function transcribeServer(file, st, onProgress) {
     method: 'POST',
     headers: {
       'content-type': 'text/plain',
+      ...authHeaders(),
       ...(st.teamCode ? { 'x-team-code': st.teamCode } : {}),
     },
     body: b64,

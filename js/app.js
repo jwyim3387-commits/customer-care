@@ -12,6 +12,7 @@ import { putAudio, getAudio, delAudio, listAudio, usage, fmtSize } from './db.js
 import { syncNow, autoSync, canSync, health, fmtWhen } from './sync.js';
 import * as SCHEMA from './schema.js';
 import { saveHwpx, siteBlocks, visitBlocks } from './hwpx.js';
+import * as A from './auth.js';
 
 async function hwpxSave(filename, title, blocks) {
   try {
@@ -501,7 +502,37 @@ function viewSettings() {
     if (el) el.textContent += ` · 보관 녹음 ${u.count}건 (${fmtSize(u.bytes)})`;
   }).catch(() => {});
 
+  /* 내 계정 : 구글 로그인 */
+  const me = A.session();
+  const acctNote = h('div', { class: 'sub', style: 'margin:6px 0 0' },
+    me ? `${new Date(me.expiresAt).toLocaleDateString('ko-KR')} 까지 유효합니다`
+       : '로그인하면 등록된 회사 계정만 서버 자료를 볼 수 있고, 상담 기록에 누가 적었는지 남습니다');
+  const acctArea = h('div', {});
+
+  if (me) {
+    acctArea.append(
+      h('div', { style: 'font-weight:600' }, `${me.name ? me.name + ' · ' : ''}${me.email}`),
+      h('div', { class: 'row', style: 'margin-top:8px' },
+        h('button', {
+          class: 'btn btn-g',
+          onclick: async () => { await A.signOut(S.settings()); toast('로그아웃했습니다'); viewSettings(); },
+        }, '로그아웃')));
+  } else if (!A.configured()) {
+    acctArea.append(h('div', { class: 'note' },
+      '구글 로그인이 아직 준비되지 않았습니다. 준비되면 이 자리에 로그인 단추가 생깁니다.'));
+  } else {
+    const slot = h('div', { style: 'margin:4px 0' });
+    acctArea.append(slot);
+    A.mountSignIn(slot, st, (err, acc) => {
+      if (err) { acctNote.className = 'note err'; acctNote.textContent = err.message; return; }
+      if (acc && acc.name && !S.settings().userName) S.setSetting('userName', acc.name);
+      toast(`${acc.email} 로 로그인했습니다`);
+      viewSettings();
+    }).catch(e => { acctNote.className = 'note err'; acctNote.textContent = e.message; });
+  }
+
   render('설정', h('div', {},
+    card('내 계정', acctArea, acctNote),
     card('회사 서버 (팀 공유 · AI 분석)',
       h('div', { class: 'note' }, '주소를 넣으면 팀원과 기록을 함께 쓰고, 휴대폰마다 키를 넣지 않아도 AI 분석이 됩니다. 넣지 않아도 앱은 그대로 쓸 수 있습니다.'),
       h('label', { class: 'f' }, h('span', {}, '서버 주소'),

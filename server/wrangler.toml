@@ -20,3 +20,9 @@ database_id = "bcae275e-8b20-4b73-8a00-db8328ca53bf"
 [vars]
 # 앱 주소만 허용하려면 아래를 켠다(보안 강화). 비워 두면 모든 곳에서 호출 가능
 # ALLOW_ORIGIN = "https://jwyim3387-commits.github.io"
+# 구글 로그인 (클라이언트 ID 는 공개되어도 되는 값이라 여기에 둔다)
+GOOGLE_CLIENT_ID = ""
+# 허용할 회사 메일 도메인. 개별 주소는 ALLOWED_EMAILS 를 secret 으로 넣는다
+ALLOWED_DOMAIN = "mind-one.co.kr"
+# "1" 로 바꾸면 로그인하지 않은 기기는 서버 자료에 접근할 수 없다 (전원 로그인 후 켠다)
+REQUIRE_LOGIN = "0"

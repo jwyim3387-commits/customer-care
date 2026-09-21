@@ -1,5 +1,6 @@
 // 상담 녹취 → 질문지 답변 · 상담일지 항목 자동 정리 (Claude API 직접 호출)
 import { QUESTIONS } from './schema.js';
+import { authHeaders } from './auth.js';
 
 const API = 'https://api.anthropic.com/v1/messages';
 
@@ -58,7 +59,7 @@ export async function analyze(transcript, ctx, settings, onStatus) {
   const endpoint = serverAnalyze(settings);
   const useProxy = !!endpoint;
   const headers = useProxy
-    ? { 'content-type': 'application/json', ...(settings.teamCode ? { 'x-team-code': settings.teamCode } : {}) }
+    ? { 'content-type': 'application/json', ...authHeaders(), ...(settings.teamCode ? { 'x-team-code': settings.teamCode } : {}) }
     : {
       'content-type': 'application/json',
       'x-api-key': settings.anthropicKey,

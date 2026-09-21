@@ -14,3 +14,14 @@ CREATE TABLE IF NOT EXISTS docs (
 
 CREATE INDEX IF NOT EXISTS idx_docs_updated ON docs (updated_at);
 CREATE INDEX IF NOT EXISTS idx_docs_server ON docs (server_at);
+
+-- 구글 로그인 출입증. 토큰 자체는 저장하지 않고 지문(SHA-256)만 둔다.
+CREATE TABLE IF NOT EXISTS sessions (
+  token_hash TEXT PRIMARY KEY,
+  email      TEXT NOT NULL,
+  name       TEXT,
+  created_at TEXT NOT NULL,
+  expires_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_sessions_exp ON sessions (expires_at);

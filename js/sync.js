@@ -1,12 +1,14 @@
 // 회사 서버 동기화 : 기기에 먼저 저장하고, 통신이 될 때 서버와 주고받는다.
 // 순서는 항상 '받기 → 합치기 → 보내기' 다. 그래야 다른 사람이 올린 기록을 지우지 않는다.
 import * as S from './store.js';
+import { authHeaders } from './auth.js';
 
 export const serverBase = (st) => (st.serverUrl || '').replace(/\/+$/, '');
 export const canSync = (st) => !!serverBase(st);
 
 const headers = (st) => ({
   'content-type': 'application/json',
+  ...authHeaders(),                                                        // 구글 로그인 출입증
   ...(st.teamCode ? { 'x-team-code': st.teamCode } : {}),
   ...(st.userName ? { 'x-user': encodeURIComponent(st.userName) } : {}),   // 헤더는 영문만 가능해 인코딩
 });
