@@ -47,7 +47,7 @@ export function addSite(org) {
   db.sites.push(s); save(); return s;
 }
 export function updateSite(id, patch) {
-  const s = site(id); if (!s) return; Object.assign(s, patch); save();
+  const s = site(id); if (!s) return; Object.assign(s, patch, { updatedAt: new Date().toISOString() }); save();
 }
 export function removeSite(id) {
   db.sites = db.sites.filter(s => s.id !== id);
@@ -107,7 +107,7 @@ export function addVisit(siteId) {
   db.visits.push(v); save(); return v;
 }
 export function updateVisit(id, patch) {
-  const v = visit(id); if (!v) return; Object.assign(v, patch); save();
+  const v = visit(id); if (!v) return; Object.assign(v, patch, { updatedAt: new Date().toISOString() }); save();
 }
 export function removeVisit(id) { db.visits = db.visits.filter(v => v.id !== id); save(); }
 
@@ -118,8 +118,10 @@ export function lastVisitDate(siteId) {
 }
 
 /* ───────── 백업 */
-export function exportJson() {
-  return JSON.stringify(db, null, 1);
+/** share=true 면 설정(API 키)을 빼고 내보낸다. 동료에게 줄 파일은 반드시 공유용으로 */
+export function exportJson({ share = false } = {}) {
+  const out = share ? { sites: db.sites, visits: db.visits, sharedAt: new Date().toISOString() } : db;
+  return JSON.stringify(out, null, 1);
 }
 export function importJson(text) {
   const d = JSON.parse(text);
@@ -128,3 +130,74 @@ export function importJson(text) {
   save();
 }
 export function wipe() { db = structuredClone(EMPTY); save(); }
+
+/* ───────── 병합 (동료 백업 파일 합치기)
+   같은 항목은 한 번만 남기고, 상담 기록처럼 쌓이는 자료는 양쪽을 모두 살린다.
+   설정(API 키)은 가져오지 않는다. */
+
+const norm = (v) => String(v || '').replace(/\s+/g, '').toLowerCase();
+const newer = (a, b) => (b.updatedAt || b.createdAt || '') > (a.updatedAt || a.createdAt || '');
+
+function mergeList(target, incoming, sig) {
+  let added = 0;
+  const byId = new Map(target.map(x => [x.id, x]));
+  const bySig = new Map(target.map(x => [sig(x), x]));
+  for (const item of incoming || []) {
+    const cur = byId.get(item.id) || bySig.get(sig(item));
+    if (!cur) {
+      const copy = { ...item, id: byId.has(item.id) ? uid() : (item.id || uid()) };
+      target.push(copy); byId.set(copy.id, copy); bySig.set(sig(copy), copy); added++;
+      continue;
+    }
+    for (const [k, v] of Object.entries(item)) {          // 빈 칸만 채운다
+      if (k === 'id') continue;
+      if (v && !String(cur[k] ?? '').trim()) cur[k] = v;
+    }
+  }
+  return added;
+}
+
+export function mergeJson(text) {
+  const inc = JSON.parse(text);
+  if (!inc || !Array.isArray(inc.sites)) throw new Error('형식이 올바르지 않습니다');
+  const st = { sitesAdded: 0, sitesMerged: 0, managers: 0, logs: 0, actions: 0, visitsAdded: 0, visitsMerged: 0 };
+  const idMap = {};
+
+  for (const s2 of inc.sites) {
+    let cur = db.sites.find(x => x.id === s2.id) || db.sites.find(x => norm(x.org) === norm(s2.org));
+    if (!cur) {
+      cur = { ...structuredClone(s2), id: db.sites.some(x => x.id === s2.id) ? uid() : (s2.id || uid()) };
+      cur.managers ||= []; cur.logs ||= []; cur.actions ||= []; cur.memo ||= {};
+      db.sites.push(cur); st.sitesAdded++;
+    } else {
+      st.sitesMerged++;
+      for (const k of ['org', 'ourTeam', 'system', 'amount', 'method']) {
+        if (s2[k] && !String(cur[k] ?? '').trim()) cur[k] = s2[k];
+      }
+      cur.memo = { ...(s2.memo || {}), ...(cur.memo || {}) };          // 내 값 우선
+      st.managers += mergeList(cur.managers ||= [], s2.managers, m => norm(m.name) + '|' + norm(m.title));
+      st.logs += mergeList(cur.logs ||= [], s2.logs, l => norm(l.date) + '|' + norm(l.counterpart) + '|' + norm((l.summary || '').slice(0, 30)));
+      st.actions += mergeList(cur.actions ||= [], s2.actions, a => norm(a.text) + '|' + norm(a.owner));
+    }
+    idMap[s2.id] = cur.id;
+  }
+
+  for (const v of inc.visits || []) {
+    const siteId = idMap[v.siteId] || v.siteId;
+    if (!db.sites.some(x => x.id === siteId)) continue;               // 사이트 없는 방문은 건너뜀
+    const cur = db.visits.find(x => x.id === v.id);
+    if (!cur) { db.visits.push({ ...structuredClone(v), siteId }); st.visitsAdded++; continue; }
+    st.visitsMerged++;
+    for (const key of ['answers', 'pre', 'close']) {
+      const src = v[key] || {}; const dst = cur[key] ||= {};
+      for (const [k, val] of Object.entries(src)) if (val && !String(dst[k] ?? '').trim()) dst[k] = val;
+    }
+    for (const k of ['dept', 'counterpart', 'counterpartInfo', 'visitor', 'purpose', 'transcript']) {
+      if (v[k] && !String(cur[k] ?? '').trim()) cur[k] = v[k];
+    }
+    if (newer(cur, v) && v.date) cur.date = v.date;
+  }
+
+  save();
+  return st;
+}

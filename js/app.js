@@ -434,14 +434,27 @@ function viewSettings() {
       oninput: (e) => S.setSetting(key, e.target.value.trim()),
     }), hint ? h('div', { class: 'sub', style: 'margin:4px 0 0' }, hint) : null);
 
+  let mode = 'merge';
   const fileIn = h('input', {
     type: 'file', accept: '.json,application/json', style: 'display:none',
     onchange: async (e) => {
       const f = e.target.files[0]; if (!f) return;
-      try { S.importJson(await f.text()); toast('복원했습니다'); go('#/'); }
-      catch (err) { alert('복원 실패 : ' + err.message); }
+      e.target.value = '';
+      try {
+        const text = await f.text();
+        if (mode === 'merge') {
+          const r = S.mergeJson(text);
+          alert(`합치기 완료\n\n새 사이트 ${r.sitesAdded}곳 · 기존 사이트 갱신 ${r.sitesMerged}곳\n상담 기록 ${r.logs}건 · 담당자 ${r.managers}명 · 후속 조치 ${r.actions}건\n질문지 ${r.visitsAdded}건 추가 · ${r.visitsMerged}건 보완`);
+        } else {
+          if (!confirm('내 데이터를 모두 지우고 이 파일로 바꿉니다. 계속할까요?')) return;
+          S.importJson(text);
+          alert('복원했습니다');
+        }
+        go('#/');
+      } catch (err) { alert((mode === 'merge' ? '합치기' : '복원') + ' 실패 : ' + err.message); }
     },
   });
+  const pick = (m) => { mode = m; fileIn.click(); };
 
   usage().then(u => {
     const el = $('#usage');
@@ -467,9 +480,19 @@ function viewSettings() {
       h('div', { class: 'note' }, '키는 이 휴대폰 브라우저에만 저장되며 마인드원 서버로 전송되지 않습니다. 공용 기기에서는 사용 후 지워 주세요.')),
     card('데이터',
       h('div', { class: 'sub', id: 'usage' }, `사이트 ${S.all().sites.length}곳 · 질문지 ${S.all().visits.length}건`),
+      h('div', { class: 'sub', style: 'margin:8px 0 4px' }, '동료와 나누기'),
       h('div', { class: 'row' },
-        h('button', { class: 'btn btn-g', onclick: () => download(`상담데이터_${S.today()}.json`, S.exportJson(), 'application/json') }, '백업 내보내기'),
-        h('button', { class: 'btn btn-g', onclick: () => fileIn.click() }, '백업 복원')),
+        h('button', {
+          class: 'btn btn-s',
+          onclick: () => download(`상담공유_${S.today()}.json`, S.exportJson({ share: true }), 'application/json'),
+        }, '공유용 내보내기'),
+        h('button', { class: 'btn btn-s', onclick: () => pick('merge') }, '받은 파일 합치기')),
+      h('div', { class: 'sub', style: 'margin:4px 0 0' },
+        '공유용 파일에는 API 키가 들어가지 않습니다. 합치기는 같은 사이트를 하나로 모으고 상담 기록은 양쪽을 모두 살립니다'),
+      h('div', { class: 'sub', style: 'margin:12px 0 4px' }, '기기 옮기기 · 백업'),
+      h('div', { class: 'row' },
+        h('button', { class: 'btn btn-g', onclick: () => download(`전체백업_${S.today()}.json`, S.exportJson(), 'application/json') }, '전체 백업 (키 포함)'),
+        h('button', { class: 'btn btn-g', onclick: () => pick('replace') }, '덮어쓰기 복원')),
       fileIn,
       h('div', { class: 'row', style: 'margin-top:8px' },
         h('button', {
