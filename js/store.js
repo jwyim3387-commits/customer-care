@@ -242,7 +242,8 @@ export function applyRemote(items = []) {
 
     const R = it.data || {};
     if (it.kind === 'site') {
-      const cur = db.sites.find(x => x.id === it.id);
+      // 번호가 다르더라도 이름이 같으면 같은 사이트로 본다
+      const cur = db.sites.find(x => x.id === it.id) || db.sites.find(x => norm(x.org) === norm(R.org));
       if (!cur) { db.sites.push(structuredClone(R)); st.sitesNew++; continue; }
       const remoteNewer = stamp(R) > stamp(cur);
       for (const k of ['org', 'ourTeam', 'system', 'amount', 'method']) {
@@ -271,6 +272,8 @@ export function applyRemote(items = []) {
       st.visitsUpdated++;
     }
   }
+  const merged = dedupeSites();
+  if (merged) st.duplicatesMerged = merged;
   save();
   return st;
 }
@@ -279,4 +282,39 @@ export function applyRemote(items = []) {
 export function clearTombstones(upTo) {
   db.tombstones = (db.tombstones || []).filter(t => t.updatedAt > upTo);
   save();
+}
+
+
+/** 이름이 같은 사이트를 하나로 합친다 (기기마다 따로 만들어 번호가 다른 경우) */
+export function dedupeSites() {
+  const groups = new Map();
+  for (const s2 of db.sites) {
+    const key = norm(s2.org);
+    if (!key) continue;
+    (groups.get(key) || groups.set(key, []).get(key)).push(s2);
+  }
+  let merged = 0;
+  for (const list of groups.values()) {
+    if (list.length < 2) continue;
+    // 기록이 많은 쪽, 같으면 먼저 만든 쪽을 남긴다
+    list.sort((a, b) => (b.logs?.length || 0) - (a.logs?.length || 0)
+      || String(a.createdAt || '').localeCompare(String(b.createdAt || '')));
+    const keep = list[0];
+    for (const dup of list.slice(1)) {
+      for (const k of ['ourTeam', 'system', 'amount', 'method']) {
+        if (dup[k] && !String(keep[k] ?? '').trim()) keep[k] = dup[k];
+      }
+      keep.memo = { ...(dup.memo || {}), ...(keep.memo || {}) };
+      mergeList(keep.managers ||= [], dup.managers, m => norm(m.name) + '|' + norm(m.title));
+      mergeList(keep.logs ||= [], dup.logs, l => norm(l.date) + '|' + norm(l.counterpart) + '|' + norm((l.summary || '').slice(0, 30)));
+      mergeList(keep.actions ||= [], dup.actions, a => norm(a.text) + '|' + norm(a.owner));
+      db.visits.forEach(v => { if (v.siteId === dup.id) { v.siteId = keep.id; v.updatedAt = new Date().toISOString(); } });
+      tomb('site', dup.id);                       // 다른 기기에서도 지워지도록
+      db.sites = db.sites.filter(x => x.id !== dup.id);
+      merged++;
+    }
+    keep.updatedAt = new Date().toISOString();
+  }
+  if (merged) save();
+  return merged;
 }
