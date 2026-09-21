@@ -1,0 +1,19 @@
+# Cloudflare Workers 설정
+# 1) wrangler d1 create mindone-cc  → 출력된 database_id 를 아래에 붙여 넣는다
+# 2) wrangler d1 execute mindone-cc --remote --file server/schema.sql
+# 3) wrangler deploy --config server/wrangler.toml
+# 4) wrangler secret put ANTHROPIC_API_KEY --config server/wrangler.toml
+#    wrangler secret put TEAM_CODE --config server/wrangler.toml
+
+name = "mindone-cc"
+main = "worker.js"
+compatibility_date = "2026-01-01"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "mindone-cc"
+database_id = "여기에-d1-create-결과-id-를-넣으세요"
+
+[vars]
+# 앱 주소만 허용하려면 아래를 켠다(보안 강화). 비워 두면 모든 곳에서 호출 가능
+# ALLOW_ORIGIN = "https://jwyim3387-commits.github.io"

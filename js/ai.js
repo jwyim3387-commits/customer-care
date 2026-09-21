@@ -39,8 +39,9 @@ ${transcript}
 answers 는 위 19개 항목 모두를 키로 포함하고, 녹취에 근거가 없으면 "" 로 둡니다.`;
 }
 
-/** 회사 공용 서버(프록시)가 설정돼 있으면 키 없이 그쪽으로 보낸다 */
-export const hasAi = (settings) => !!(settings.proxyUrl || settings.anthropicKey);
+/** 회사 공용 서버가 설정돼 있으면 키 없이 그쪽으로 보낸다 */
+const serverAnalyze = (st) => (st.serverUrl ? st.serverUrl.replace(/\/+$/, '') + '/analyze' : st.proxyUrl || '');
+export const hasAi = (settings) => !!(serverAnalyze(settings) || settings.anthropicKey);
 
 export async function analyze(transcript, ctx, settings, onStatus) {
   if (!hasAi(settings)) throw new Error('AI 분석을 쓰려면 설정에서 회사 서버 주소나 Claude API 키를 넣어 주세요.');
@@ -54,7 +55,8 @@ export async function analyze(transcript, ctx, settings, onStatus) {
     messages: [{ role: 'user', content: userPrompt(transcript, ctx) }],
   });
 
-  const useProxy = !!settings.proxyUrl;
+  const endpoint = serverAnalyze(settings);
+  const useProxy = !!endpoint;
   const headers = useProxy
     ? { 'content-type': 'application/json', ...(settings.teamCode ? { 'x-team-code': settings.teamCode } : {}) }
     : {
@@ -64,7 +66,7 @@ export async function analyze(transcript, ctx, settings, onStatus) {
       'anthropic-dangerous-direct-browser-access': 'true',
     };
 
-  const r = await fetch(useProxy ? settings.proxyUrl : API, { method: 'POST', headers, body });
+  const r = await fetch(useProxy ? endpoint : API, { method: 'POST', headers, body });
 
   if (!r.ok) {
     const t = await r.text();

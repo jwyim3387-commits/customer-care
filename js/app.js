@@ -9,6 +9,7 @@ import { Recorder, fmtTime, hasRecorder, hasLiveSTT, transcribeFile } from './au
 import { analyze, filledCount, hasAi } from './ai.js';
 import { analyzeLocal } from './localai.js';
 import { putAudio, getAudio, delAudio, listAudio, usage, fmtSize } from './db.js';
+import { syncNow, autoSync, canSync, health, fmtWhen } from './sync.js';
 import * as SCHEMA from './schema.js';
 import { saveHwpx, siteBlocks, visitBlocks } from './hwpx.js';
 
@@ -36,7 +37,15 @@ function viewSites() {
           const org = prompt('지자체 · 사이트 이름'); if (!org) return;
           const s = S.addSite(org.trim()); go('#/site/' + s.id);
         }
-      }, '＋ 사이트 추가')),
+      }, '＋ 사이트 추가'),
+      canSync(S.settings()) ? h('button', {
+        class: 'btn btn-s', style: 'flex:0 0 auto',
+        onclick: async (e) => {
+          const b = e.currentTarget; b.disabled = true; b.textContent = '…';
+          try { const r = await syncNow(S.settings()); toast(`동기화 완료 (받음 ${r.pulled} · 보냄 ${r.pushed})`); viewSites(); }
+          catch (err) { toast(err.message); b.disabled = false; b.textContent = '↻ 동기화'; }
+        }
+      }, '↻ 동기화') : null),
     list.length ? null : h('div', { class: 'empty' }, '등록된 사이트가 없습니다.\n방문할 지자체를 추가해 주세요.'),
     ...list.map(s => {
       const last = S.lastVisitDate(s.id);
@@ -428,6 +437,20 @@ function preview(res, siteId, visitId, state) {
 /* ════════════════════════ 5. 설정 */
 function viewSettings() {
   const st = S.settings();
+  const syncMsg = h('div', { class: 'sub', style: 'margin:6px 0 0' },
+    canSync(st) ? `마지막 동기화 : ${fmtWhen(st.lastSync)}` : '서버 주소를 넣으면 팀원과 기록을 함께 쓸 수 있습니다');
+
+  async function doSync() {
+    try {
+      syncMsg.className = 'sub';
+      const r = await syncNow(S.settings(), (m) => { syncMsg.textContent = m; });
+      const ap = r.applied;
+      syncMsg.textContent = `동기화 완료 : 받은 ${r.pulled}건 (새 사이트 ${ap.sitesNew} · 새 질문지 ${ap.visitsNew}), 올린 ${r.pushed}건`;
+      toast('동기화했습니다');
+    } catch (e) {
+      syncMsg.className = 'note err'; syncMsg.textContent = e.message;
+    }
+  }
   const k = (key, label, ph, hint) => h('label', { class: 'f' },
     h('span', {}, label), h('input', {
       type: 'password', value: st[key] || '', placeholder: ph,
@@ -462,16 +485,29 @@ function viewSettings() {
   }).catch(() => {});
 
   render('설정', h('div', {},
-    card('AI 분석 (선택)',
-      h('div', { class: 'note' }, '키를 넣지 않아도 「키 없이 정리」로 녹취를 양식에 나눠 담을 수 있습니다. AI 분석은 더 정확하게 정리할 때만 씁니다.'),
-      h('label', { class: 'f' }, h('span', {}, '회사 서버 주소 (팀 공용, 키 불필요)'),
+    card('회사 서버 (팀 공유 · AI 분석)',
+      h('div', { class: 'note' }, '주소를 넣으면 팀원과 기록을 함께 쓰고, 휴대폰마다 키를 넣지 않아도 AI 분석이 됩니다. 넣지 않아도 앱은 그대로 쓸 수 있습니다.'),
+      h('label', { class: 'f' }, h('span', {}, '서버 주소'),
         h('input', {
-          type: 'text', value: st.proxyUrl || '', placeholder: 'https://....workers.dev/analyze',
-          oninput: (e) => S.setSetting('proxyUrl', e.target.value.trim()),
-        }),
-        h('div', { class: 'sub', style: 'margin:4px 0 0' }, '회사가 서버를 한 번 만들어 두면 이 주소만 넣으면 됩니다. 휴대폰마다 키를 넣을 필요가 없습니다')),
-      k('teamCode', '팀 코드 (회사 서버용)', '사내에서 정한 값', '서버가 요구할 때만 입력합니다'),
-      k('anthropicKey', 'Claude API 키 (개인용, 서버가 없을 때)', 'sk-ant-...', 'console.anthropic.com 에서 발급'),
+          type: 'text', value: st.serverUrl || '', placeholder: 'https://mindone-cc.<계정>.workers.dev',
+          oninput: (e) => S.setSetting('serverUrl', e.target.value.trim().replace(/\/+$/, '')),
+        })),
+      k('teamCode', '팀 코드', '사내에서 정한 값', '서버에 설정한 값과 같아야 합니다'),
+      h('label', { class: 'f' }, h('span', {}, '내 이름 (기록 표시용)'),
+        h('input', {
+          type: 'text', value: st.userName || '', placeholder: '임정욱',
+          oninput: (e) => S.setSetting('userName', e.target.value.trim()),
+        })),
+      h('div', { class: 'row' },
+        h('button', { class: 'btn btn-p', onclick: () => doSync() }, '지금 동기화'),
+        h('button', {
+          class: 'btn btn-g', onclick: async () => {
+            try { const r = await health(S.settings()); syncMsg.textContent = `서버 정상 (저장소 ${r.db ? '연결' : '없음'} · 분석 ${r.ai ? '가능' : '불가'})`; syncMsg.className = 'sub'; }
+            catch (e) { syncMsg.textContent = '연결 실패 : ' + e.message; syncMsg.className = 'note err'; }
+          }
+        }, '연결 확인')),
+      syncMsg,
+      k('anthropicKey', 'Claude API 키 (서버가 없을 때만)', 'sk-ant-...', '개인 키로 분석하려면 입력합니다'),
       h('label', { class: 'f' }, h('span', {}, '분석 모델'),
         h('select', { onchange: (e) => S.setSetting('model', e.target.value) },
           ...['claude-sonnet-5', 'claude-opus-5', 'claude-haiku-4-5-20251001'].map(m =>
@@ -576,6 +612,7 @@ function route() {
 window.addEventListener('hashchange', route);
 window.addEventListener('DOMContentLoaded', () => {
   route();
+  autoSync(S.settings()).then(r => { if (r && (r.pulled || r.pushed)) { toast(`서버와 동기화 (받음 ${r.pulled} · 보냄 ${r.pushed})`); route(); } });
   if ('serviceWorker' in navigator) navigator.serviceWorker.register('./sw.js').catch(() => {});
 });
 if (document.readyState !== 'loading') { route(); }

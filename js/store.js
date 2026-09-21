@@ -1,7 +1,7 @@
 // 로컬 저장소 : 데이터는 이 기기 브라우저에만 저장된다(서버 없음).
 const KEY = 'mindone.customercare.v1';
 
-const EMPTY = { sites: [], visits: [], settings: { model: 'claude-sonnet-5', stt: 'browser' } };
+const EMPTY = { sites: [], visits: [], tombstones: [], settings: { model: 'claude-sonnet-5', stt: 'browser' } };
 
 export const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
 export const today = () => new Date().toISOString().slice(0, 10);
@@ -50,46 +50,52 @@ export function updateSite(id, patch) {
   const s = site(id); if (!s) return; Object.assign(s, patch, { updatedAt: new Date().toISOString() }); save();
 }
 export function removeSite(id) {
+  db.visits.filter(v => v.siteId === id).forEach(v => tomb('visit', v.id));
+  tomb('site', id);
   db.sites = db.sites.filter(s => s.id !== id);
   db.visits = db.visits.filter(v => v.siteId !== id);
   save();
 }
 
+const touch = (siteId) => { const s2 = site(siteId); if (s2) s2.updatedAt = new Date().toISOString(); };
+const tomb = (kind, id) => { db.tombstones = [...(db.tombstones || []).filter(t => !(t.kind === kind && t.id === id)),
+  { kind, id, updatedAt: new Date().toISOString() }]; };
+
 /* ───────── 상담 누적 · 담당자 · 후속 조치 */
 export function addLog(siteId, log = {}) {
   const s = site(siteId); if (!s) return null;
   const l = { id: uid(), date: today(), counterpart: '', visitor: '', summary: '', request: '', issue: '', promise: '', ...log };
-  s.logs.unshift(l); save(); return l;
+  s.logs.unshift(l); touch(siteId); save(); return l;
 }
 export function updateLog(siteId, logId, patch) {
-  const l = site(siteId)?.logs.find(x => x.id === logId); if (!l) return; Object.assign(l, patch); save();
+  const l = site(siteId)?.logs.find(x => x.id === logId); if (!l) return; Object.assign(l, patch); touch(siteId); save();
 }
 export function removeLog(siteId, logId) {
-  const s = site(siteId); if (!s) return; s.logs = s.logs.filter(x => x.id !== logId); save();
+  const s = site(siteId); if (!s) return; s.logs = s.logs.filter(x => x.id !== logId); touch(siteId); save();
 }
 
 export function addManager(siteId, m = {}) {
   const s = site(siteId); if (!s) return null;
   const x = { id: uid(), name: '', title: '', phone: '', traits: '', history: '', ...m };
-  s.managers.push(x); save(); return x;
+  s.managers.push(x); touch(siteId); save(); return x;
 }
 export function updateManager(siteId, id, patch) {
-  const m = site(siteId)?.managers.find(x => x.id === id); if (!m) return; Object.assign(m, patch); save();
+  const m = site(siteId)?.managers.find(x => x.id === id); if (!m) return; Object.assign(m, patch); touch(siteId); save();
 }
 export function removeManager(siteId, id) {
-  const s = site(siteId); if (!s) return; s.managers = s.managers.filter(x => x.id !== id); save();
+  const s = site(siteId); if (!s) return; s.managers = s.managers.filter(x => x.id !== id); touch(siteId); save();
 }
 
 export function addAction(siteId, a = {}) {
   const s = site(siteId); if (!s) return null;
   const x = { id: uid(), text: '', owner: '', due: '', done: false, ...a };
-  s.actions.push(x); save(); return x;
+  s.actions.push(x); touch(siteId); save(); return x;
 }
 export function updateAction(siteId, id, patch) {
-  const a = site(siteId)?.actions.find(x => x.id === id); if (!a) return; Object.assign(a, patch); save();
+  const a = site(siteId)?.actions.find(x => x.id === id); if (!a) return; Object.assign(a, patch); touch(siteId); save();
 }
 export function removeAction(siteId, id) {
-  const s = site(siteId); if (!s) return; s.actions = s.actions.filter(x => x.id !== id); save();
+  const s = site(siteId); if (!s) return; s.actions = s.actions.filter(x => x.id !== id); touch(siteId); save();
 }
 
 /* ───────── 방문(질문지) */
@@ -109,7 +115,7 @@ export function addVisit(siteId) {
 export function updateVisit(id, patch) {
   const v = visit(id); if (!v) return; Object.assign(v, patch, { updatedAt: new Date().toISOString() }); save();
 }
-export function removeVisit(id) { db.visits = db.visits.filter(v => v.id !== id); save(); }
+export function removeVisit(id) { tomb('visit', id); db.visits = db.visits.filter(v => v.id !== id); save(); }
 
 export function lastVisitDate(siteId) {
   const v = visits(siteId)[0];
@@ -200,4 +206,77 @@ export function mergeJson(text) {
 
   save();
   return st;
+}
+
+
+/* ═════════ 서버 동기화 지원 ═════════ */
+
+const stamp = (o) => o.updatedAt || o.createdAt || '1970-01-01T00:00:00.000Z';
+
+/** since 이후에 바뀐 것만 모아 올릴 형태로 만든다 */
+export function changedSince(since = '') {
+  const out = [];
+  for (const s2 of db.sites) if (stamp(s2) > since) out.push({ kind: 'site', id: s2.id, updatedAt: stamp(s2), data: s2 });
+  for (const v of db.visits) if (stamp(v) > since) out.push({ kind: 'visit', id: v.id, updatedAt: stamp(v), data: v });
+  for (const t of db.tombstones || []) if (t.updatedAt > since) out.push({ kind: t.kind, id: t.id, updatedAt: t.updatedAt, deleted: true });
+  return out;
+}
+
+/** 서버에서 받은 것을 반영한다. 목록(상담 기록 등)은 합치고, 겹치는 값은 나중에 고친 쪽을 쓴다 */
+export function applyRemote(items = []) {
+  const st = { sitesNew: 0, sitesUpdated: 0, visitsNew: 0, visitsUpdated: 0, removed: 0 };
+  for (const it of items) {
+    if (!it || !it.kind || !it.id) continue;
+
+    if (it.deleted) {
+      if (it.kind === 'site' && db.sites.some(x => x.id === it.id)) {
+        db.sites = db.sites.filter(x => x.id !== it.id);
+        db.visits = db.visits.filter(v => v.siteId !== it.id);
+        st.removed++;
+      } else if (it.kind === 'visit' && db.visits.some(x => x.id === it.id)) {
+        db.visits = db.visits.filter(x => x.id !== it.id); st.removed++;
+      }
+      db.tombstones = (db.tombstones || []).filter(t => !(t.kind === it.kind && t.id === it.id));
+      continue;
+    }
+
+    const R = it.data || {};
+    if (it.kind === 'site') {
+      const cur = db.sites.find(x => x.id === it.id);
+      if (!cur) { db.sites.push(structuredClone(R)); st.sitesNew++; continue; }
+      const remoteNewer = stamp(R) > stamp(cur);
+      for (const k of ['org', 'ourTeam', 'system', 'amount', 'method']) {
+        if (R[k] && (remoteNewer || !String(cur[k] ?? '').trim())) cur[k] = R[k];
+      }
+      cur.memo = remoteNewer ? { ...(cur.memo || {}), ...(R.memo || {}) } : { ...(R.memo || {}), ...(cur.memo || {}) };
+      mergeList(cur.managers ||= [], R.managers, m => norm(m.name) + '|' + norm(m.title));
+      mergeList(cur.logs ||= [], R.logs, l => norm(l.date) + '|' + norm(l.counterpart) + '|' + norm((l.summary || '').slice(0, 30)));
+      mergeList(cur.actions ||= [], R.actions, a => norm(a.text) + '|' + norm(a.owner));
+      if (remoteNewer) cur.updatedAt = R.updatedAt;
+      st.sitesUpdated++;
+    } else if (it.kind === 'visit') {
+      const cur = db.visits.find(x => x.id === it.id);
+      if (!cur) { db.visits.push(structuredClone(R)); st.visitsNew++; continue; }
+      const remoteNewer = stamp(R) > stamp(cur);
+      for (const key of ['answers', 'pre', 'close']) {
+        const src = R[key] || {}; const dst = cur[key] ||= {};
+        for (const [k, val] of Object.entries(src)) {
+          if (val && (remoteNewer || !String(dst[k] ?? '').trim())) dst[k] = val;
+        }
+      }
+      for (const k of ['date', 'dept', 'counterpart', 'counterpartInfo', 'visitor', 'purpose', 'transcript']) {
+        if (R[k] && (remoteNewer || !String(cur[k] ?? '').trim())) cur[k] = R[k];
+      }
+      if (remoteNewer) cur.updatedAt = R.updatedAt;
+      st.visitsUpdated++;
+    }
+  }
+  save();
+  return st;
+}
+
+/** 서버가 받아 간 삭제 기록은 정리한다 */
+export function clearTombstones(upTo) {
+  db.tombstones = (db.tombstones || []).filter(t => t.updatedAt > upTo);
+  save();
 }
